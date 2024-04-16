@@ -1,6 +1,18 @@
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
+class SecurePatientRecord(models.Model):
+    # Linking to the Physician model
+    physician = models.ForeignKey('Physician', related_name='patient_records', on_delete=models.CASCADE)
+    
+    # Additional fields for patient records
+    record_date = models.DateField(auto_now_add=True)  # Automatically sets the date when record is created
+    description = models.TextField(blank=True, null=True)  # Optional field for record details
+    file_path = models.FileField(upload_to='patient_records/')  # Store files related to the patient records
+
+    def __str__(self):
+        # Return a string representation that could include the date and description
+        return f"{self.record_date} - {self.description[:50]}"  # Show only the first 50 characters
 class PhysicianManager(BaseUserManager):
     def create_user(self, email, first_name, last_name, password=None):
         if not email:

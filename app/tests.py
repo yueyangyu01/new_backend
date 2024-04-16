@@ -64,6 +64,7 @@ class PhysicianPatientAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         with self.assertRaises(Patient.DoesNotExist):
             Patient.objects.get(id=self.patient.id)
+
     def test_physician_signup_missing_fields(self):
         url = reverse('physician-signup')
         data = {'email': 'incomplete@example.com'}  # Missing name and password
@@ -126,3 +127,18 @@ class PhysicianPatientAPITests(APITestCase):
         url = reverse('patient-detail', args=[self.patient1.id])
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    # New Test for sending URL via email
+    @patch('django.core.mail.send_mail')
+    def test_send_patient_info_link(self, mock_send_mail):
+        self.client.force_authenticate(user=self.physician1)
+        url = reverse('send-patient-info', args=[self.patient1.id])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_send_mail.assert_called_once_with(
+            'Your Patient Information',
+            'Please review your information here: http://localhost:3000/patient-info',
+            'no-reply@example.com',
+            [self.patient1.email],
+            fail_silently=False,
+        )

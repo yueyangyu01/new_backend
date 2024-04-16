@@ -4,13 +4,133 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from .models import Patient, Physician
+from .models import Patient, Physician, SecurePatientRecord
 from .serializers import PatientSerializer, PhysicianSerializer
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from .permissions import IsOwnerOrReadOnly
 from rest_framework_simplejwt.tokens import RefreshToken
 import logging
+from django.core.mail import send_mail
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST
+from django.contrib.auth.decorators import login_required
+from django.utils.decorators import method_decorator
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes
+from django_otp.oath import TOTP
+from django_otp.plugins.otp_totp.models import TOTPDevice
+from channels.generic.websocket import AsyncWebsocketConsumer
+import json
+
+logger = logging.getLogger(__name__)
+
+class NotificationConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        pass
+
+    async def receive(self, text_data):
+        text_data_json = json.loads(text_data)
+        message = text_data_json['message']
+        await self.send(text_data=json.dumps({'message': message}))
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_patient_info(request, patient_id):
+    if not request.user.is_authenticated or not hasattr(request.user, 'doctor'):
+        return JsonResponse({"error": "Unauthorized access"}, status=403)
+
+    try:
+        patient = Patient.objects.get(id=patient_id, doctor=request.user.doctor)
+        send_mail(
+            'Your Patient Information',
+            'Please visit this link to view your information: http://localhost:3000/patient-info',
+            'your_email@example.com',
+            [patient.email],
+            fail_silently=False,
+        )
+        return JsonResponse({"status": "Email sent successfully"})
+    except Patient.DoesNotExist:
+        return JsonResponse({"error": "Patient not found"}, status=404)
+
+# Physician SignUp View
+class PhysicianSignUpView(APIView):
+    def post(self, request, *args, **kwargs):
+        serializer = PhysicianSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            user.set_password(user.password)
+            user.save()
+            logger.info(f"New physician signed up: {user.email}")
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+            }, status=status.HTTP_201_CREATED)
+        else:
+            logger.error(f"Physician signup validation error: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# Encryption at Rest for Patient Records
+class SecurePatientDetailView(generics.RetrieveAPIView):
+    queryset = SecurePatientRecord.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        patient_id = self.kwargs.get('pk')
+        return SecurePatientRecord.objects.get(id=patient_id)
+
+# Two-Factor Authentication
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def verify_two_factor(request, token):
+    user = request.user
+    device = TOTPDevice.objects.filter(user=user).first()
+    if device.verify_token(token):
+        return Response({"message": "2FA verified"})
+    else:
+        return Response({"error": "Invalid 2FA token"}, status=status.HTTP_400_BAD_REQUEST)
+
+# Real-time notifications
+class PatientRealtimeUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Example implementation that needs real-time handling
+        patient_data = request.data
+        patient = Patient.objects.get(id=patient_data['id'])
+        patient.diagnosis = patient_data['diagnosis']
+        patient.save()
+        # Notify all subscribed clients
+        NotificationConsumer.send(json.dumps({
+            'type': 'update',
+            'message': f'Patient {patient.id} updated'
+        }))
+        return Response({"message": "Patient updated and notifications sent"})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def send_patient_info(request, patient_id):
+    if not request.user.is_authenticated or not hasattr(request.user, 'doctor'):
+        return JsonResponse({"error": "Unauthorized access"}, status=403)
+
+    try:
+        patient = Patient.objects.get(id=patient_id, doctor=request.user.doctor)
+        send_mail(
+            'Your Patient Information',
+            'Please visit this link to view your information: http://localhost:3000/patient-info',
+            'your_email@example.com',  # Your sender email
+            [patient.email],  # Recipient email
+            fail_silently=False,
+        )
+        return JsonResponse({"status": "Email sent successfully"})
+    except Patient.DoesNotExist:
+        return JsonResponse({"error": "Patient not found"}, status=404)
+
 
 logger = logging.getLogger(__name__)
 

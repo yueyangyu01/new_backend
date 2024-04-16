@@ -6,7 +6,8 @@ from app.views import (
     PhysicianPatientListView,
     PatientDetailUpdateDeleteView,
     PatientCreateView,
-    get_physician_info,  # Import the new view function
+    get_physician_info,
+    send_patient_info,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -20,4 +21,5 @@ urlpatterns = [
     path('patients/<int:pk>/', PatientDetailUpdateDeleteView.as_view(), name='patient-detail'),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/send-patient-info/<int:patient_id>/', send_patient_info, name='send-patient-info'),
 ]
